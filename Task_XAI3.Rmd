@@ -1,0 +1,142 @@
+---
+title: "Task_XAI3"
+output: html_document
+date: "2025-05-11"
+---
+
+Members:
+
+- **Sergio Tortosa Borrell**
+- **Ángel Ros Badules**
+- **Juan Martínez Uradci**
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  echo = TRUE,
+  results = "hide"
+)
+
+```
+
+
+
+
+## Necessary libraries
+
+```{r}
+library(randomForest)
+library(ggplot2)
+library(dplyr)
+library(pdp)
+
+```
+
+
+## 1.- One dimensional Partial Dependence Plot.
+
+```{r}
+data_day <- read.csv("day.csv")
+
+data_day$spring <- as.integer(data_day$season == 2)
+data_day$summer <- as.integer(data_day$season == 3)
+data_day$fall <- as.integer(data_day$season == 4)
+
+data_day$MISTY <- as.integer(data_day$weathersit == 2)
+data_day$RAIN <- as.integer(data_day$weathersit %in% c(3, 4))
+
+data_day$temp <- data_day$temp * 47 - 8
+data_day$hum <- data_day$hum * 100
+data_day$windspeed <- data_day$windspeed * 67
+
+data_day$days_from_start <- as.numeric(as.Date(data_day$dteday) - as.Date("2011-01-01"))
+
+features <- data_day[, c("spring", "summer", "fall", "MISTY", "RAIN", "temp", "hum", "windspeed", "days_from_start", "workingday", "holiday", "cnt")]
+
+set.seed(42)
+model_rf <- randomForest(cnt ~ workingday + holiday + spring + summer + fall + MISTY + RAIN + temp + hum + windspeed + days_from_start, data = features, ntree = 500)
+
+pdp_day <- partial(model_rf, pred.var = "days_from_start")
+pdp_temperature <- partial(model_rf, pred.var = "temp")
+pdp_humidity <- partial(model_rf, pred.var = "hum")
+pdp_wind <- partial(model_rf, pred.var = "windspeed")
+
+```
+
+```{r}
+autoplot(pdp_day) + ggtitle("PDP – Days from 2011")
+
+```
+
+```{r}
+autoplot(pdp_temperature) + ggtitle("PDP – Temperature")
+
+```
+
+```{r}
+autoplot(pdp_humidity) + ggtitle("PDP – Humidity")
+
+```
+
+```{r}
+autoplot(pdp_wind) + ggtitle("PDP – Wind Speed")
+
+```
+
+## 2.- Bidimensional Partial Dependency Plot.
+
+```{r}
+set.seed(42)
+subset_sample <- features %>% sample_n(500, replace = TRUE)
+
+model_rf_2d <- randomForest(cnt ~ hum + temp, data = subset_sample)
+
+pdp_2d <- partial(model_rf_2d, pred.var = c("hum", "temp"), grid.resolution = 50, chull = TRUE)
+
+h_range <- range(pdp_2d$hum)
+t_range <- range(pdp_2d$temp)
+tile_w <- diff(h_range) / 49
+tile_h <- diff(t_range) / 49
+
+ggplot() +
+  geom_tile(data = pdp_2d, aes(x = hum, y = temp, fill = yhat), width = tile_w, height = tile_h) +
+  geom_density2d(data = subset_sample, aes(x = hum, y = temp), color = "white", size = 0.3) +
+  scale_fill_viridis_c() +
+  labs(title = "2D PDP with Density Overlay",
+       x = "Humidity",
+       y = "Temperature",
+       fill = "Predicted Count") +
+  theme_minimal()
+
+```
+
+## 3.- PDP to explain the price of a house.
+
+```{r}
+housing <- read.csv("kc_house_data.csv")
+
+set.seed(42)
+housing_subset <- housing %>% sample_n(1000)
+
+model_housing <- randomForest(price ~ bedrooms + bathrooms + sqft_living + sqft_lot + floors + yr_built, data = housing_subset)
+
+variables <- c("bedrooms", "bathrooms", "sqft_living", "floors")
+
+for (v in variables) {
+  pdp_result <- partial(model_housing, pred.var = v, chull = TRUE)
+  
+  plot_pdp <- ggplot(pdp_result, aes_string(x = v, y = "yhat")) +
+    geom_line() +
+    labs(title = paste("PDP –", v),
+         x = v,
+         y = "Predicted Price") +
+    theme_minimal()
+  
+  print(plot_pdp)
+}
+
+```
+
